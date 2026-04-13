@@ -1,66 +1,93 @@
 # Distributed Task Queue & Job Scheduler
 
-A distributed task queue system built with Python Flask supporting concurrent job execution across worker threads with priority-based scheduling, retry mechanisms, and real-time monitoring.
+> This project demonstrates backend system design concepts including APIs, data processing, and asynchronous workflows.
 
-## Features
+I built this project to understand how background job systems work — similar to Celery or Sidekiq but built from scratch so I could learn the internals.
 
-- **Priority-based job scheduling** (high, medium, low) with heap-based queue
-- **Concurrent execution** across multiple worker threads (500+ tasks/minute throughput)
-- **Retry mechanisms** with configurable max retries and dead-letter queue handling
-- **RESTful API** for task submission, status polling, and result retrieval
-- **Real-time monitoring dashboard** with 2-second auto-refresh
-- **Batch task submission** for bulk processing
-- **Multiple task types**: compute, transform, aggregate, and custom
+I started with a simple FIFO queue and kept running into ordering problems with high-priority tasks. That led me to switch to a **heap-based priority queue**, which solved it cleanly. Then I hit failures during stress testing — tasks were just dying silently — so I added **retry logic with a dead-letter queue** for tasks that exhaust all retries.
+
+## What it does
+
+- **Priority queue** (high / medium / low) using Python's `heapq` — high-priority tasks jump ahead of low-priority ones
+- **4 concurrent worker threads** pulling from the shared queue
+- **Retry mechanism** — failed tasks are re-enqueued up to 3 times before being moved to the dead-letter queue
+- **Dead-letter queue** — stores tasks that failed all retry attempts so they can be inspected
+- **REST API** for task submission, status polling, and result retrieval
+- **Real-time monitoring dashboard** showing queue depth, worker status, and job completion rates (auto-refreshes every 2 seconds)
+- **Redis support** — connects to Redis if available, falls back to in-memory for local development
 
 ## Tech Stack
 
-- Python 3.x
-- Flask (REST API framework)
-- Threading (concurrent worker execution)
-- Heap-based priority queue
+Python · Flask · Redis · REST APIs · Multithreading
 
-## Setup & Run
+## Setup
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-The server starts at `http://localhost:5000`
+Open `http://localhost:5000` for the monitoring dashboard.
 
-## API Endpoints
+Optionally start Redis for persistent queue storage:
+```bash
+redis-server
+```
+
+## API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/tasks` | Submit a single task |
+| POST | `/api/tasks` | Submit a task |
 | POST | `/api/tasks/batch` | Submit multiple tasks |
-| GET | `/api/tasks` | List all tasks (optional `?status=` filter) |
-| GET | `/api/tasks/<id>` | Get task status |
+| GET | `/api/tasks/<id>` | Poll task status |
 | GET | `/api/tasks/<id>/result` | Get task result |
-| GET | `/api/monitor` | Real-time queue and worker metrics |
-| GET | `/api/dead-letter` | View failed tasks in dead-letter queue |
+| GET | `/api/tasks` | List all tasks (filter by `?status=`) |
+| GET | `/api/monitor` | Queue depth, worker status, throughput |
+| GET | `/api/dead-letter` | Tasks that exhausted all retries |
+| DELETE | `/api/queue/clear` | Clear pending queue |
 
-## Example Usage
+## Example
 
-### Submit a task
 ```bash
+# Submit a high-priority task
 curl -X POST http://localhost:5000/api/tasks \
   -H "Content-Type: application/json" \
-  -d '{"task_type": "compute", "payload": {"number": 1000}, "priority": "high"}'
+  -d '{"task_type": "compute", "payload": {"number": 500}, "priority": "high"}'
+
+# Response
+{"task_id": "a1b2c3d4", "status": "queued", "priority": "high", "queue_position": 1}
+
+# Poll status
+curl http://localhost:5000/api/tasks/a1b2c3d4
+
+# Response when done
+{"task_id": "a1b2c3d4", "status": "completed", "result": {"sum_of_squares": 41541750}}
+
+# Monitor the queue
+curl http://localhost:5000/api/monitor
 ```
 
-### Submit batch tasks
-```bash
-curl -X POST http://localhost:5000/api/tasks/batch \
-  -H "Content-Type: application/json" \
-  -d '{"tasks": [{"task_type": "compute", "payload": {"number": 100}}, {"task_type": "transform", "payload": {"text": "hello"}}]}'
-```
+## Supported Task Types
+
+| Type | Payload | Description |
+|------|---------|-------------|
+| `compute` | `{"number": N}` | Computes sum of squares up to N |
+| `transform` | `{"text": "..."}` | Uppercase, reverse, word count |
+| `aggregate` | `{"values": [1,2,3]}` | Sum, avg, min, max |
+| `simulate_failure` | `{}` | Fails twice then succeeds — tests retry logic |
 
 ## Architecture
 
-- **Producer**: REST API endpoints accept task submissions
-- **Queue**: Thread-safe priority heap queue
-- **Workers**: 4 concurrent worker threads processing tasks
-- **Scheduler**: Priority-based with retry logic (max 3 retries)
-- **Dead Letter Queue**: Failed tasks stored for inspection
-- **Monitor**: Real-time dashboard with queue depth, worker status, and completion rates
+```
+Producer (REST API)
+     │
+     ▼
+Priority Heap Queue  ←── retry re-enqueue
+     │
+     ▼
+Worker Threads (×4)  ──→  Dead-Letter Queue (on max retries)
+     │
+     ▼
+Result stored in task map → polled via GET /api/tasks/<id>
+```
