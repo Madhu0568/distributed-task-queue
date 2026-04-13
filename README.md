@@ -2,11 +2,13 @@
 
 > This project demonstrates backend system design concepts including APIs, data processing, and asynchronous workflows.
 
-I built this project to understand how background job systems work — similar to Celery or Sidekiq but built from scratch so I could learn the internals.
+## Overview
 
-I started with a simple FIFO queue and kept running into ordering problems with high-priority tasks. That led me to switch to a **heap-based priority queue**, which solved it cleanly. Then I hit failures during stress testing — tasks were just dying silently — so I added **retry logic with a dead-letter queue** for tasks that exhaust all retries.
+Built a task queue system supporting asynchronous job execution using a worker-based architecture. Designed REST APIs for task submission, status tracking, and result retrieval. Implemented retry handling for failed tasks and queue monitoring endpoints. Enables concurrent processing using worker threads for improved task throughput.
 
-## What it does
+I started with a simple FIFO queue and kept running into ordering problems with high-priority tasks. That led me to switch to a heap-based priority queue, which solved it cleanly. Then I hit failures during stress testing — tasks were just dying silently — so I added retry logic with a dead-letter queue for tasks that exhaust all retries.
+
+## Features
 
 - **Priority queue** (high / medium / low) using Python's `heapq` — high-priority tasks jump ahead of low-priority ones
 - **4 concurrent worker threads** pulling from the shared queue
@@ -20,7 +22,7 @@ I started with a simple FIFO queue and kept running into ordering problems with 
 
 Python · Flask · Redis · REST APIs · Multithreading
 
-## Setup
+## How to Run
 
 ```bash
 pip install -r requirements.txt
@@ -32,6 +34,7 @@ Open `http://localhost:5000` for the monitoring dashboard.
 Optionally start Redis for persistent queue storage:
 ```bash
 redis-server
+python worker.py   # run standalone worker process
 ```
 
 ## API
@@ -91,3 +94,7 @@ Worker Threads (×4)  ──→  Dead-Letter Queue (on max retries)
      ▼
 Result stored in task map → polled via GET /api/tasks/<id>
 ```
+
+## Output
+
+See [sample_output.txt](sample_output.txt) for real API request/response examples including task submission, status polling, dashboard stats, and dead-letter queue inspection.
